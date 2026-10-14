@@ -157,9 +157,11 @@ Learn Again
 
 Processes:
 
-- PDF textbooks
+- Text-based PDF textbooks (scanned PDFs require OCR; OCR is not configured)
+- DOCX documents, including paragraphs and tables
+- TXT and Markdown notes
 - PPTX presentations
-- Lecture video transcripts
+- Lecture video transcripts from a matching VTT sidecar (automatic audio/video transcription is not configured)
 
 Preserves exact source metadata including:
 

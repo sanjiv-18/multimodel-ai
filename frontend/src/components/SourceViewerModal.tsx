@@ -14,7 +14,7 @@ export const SourceViewerModal: React.FC<SourceViewerModalProps> = ({ citation, 
     if (citation.material_type === 'pdf' && citation.page_number) return `Page ${citation.page_number}`;
     if (citation.material_type === 'pptx' && citation.slide_number) return `Slide ${citation.slide_number}`;
     if (citation.material_type === 'video' && citation.video_timestamp) return `Timestamp ${citation.video_timestamp}`;
-    return 'Document Reference';
+    return 'Document Excerpt';
   };
 
   return (
@@ -93,8 +93,12 @@ export const SourceViewerModal: React.FC<SourceViewerModalProps> = ({ citation, 
                   <FileText className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-bold text-slate-900">PDF Document Reference</h4>
-                  <p className="text-xs text-slate-500 font-mono">Page {citation.page_number || 1} of document</p>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    {citation.material_type === 'pdf' ? 'PDF Document Reference' : 'Document Excerpt'}
+                  </h4>
+                  {citation.page_number && (
+                    <p className="text-xs text-slate-500 font-mono">Page {citation.page_number} of document</p>
+                  )}
                 </div>
               </div>
               <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 font-medium">

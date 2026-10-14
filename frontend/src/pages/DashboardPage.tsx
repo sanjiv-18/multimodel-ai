@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService, learnerService } from '../services/api';
-import { Course, LearnerOverview } from '../types';
+import { Course, LearnerOverview, StudyPlan } from '../types';
 import {
   ArrowRight,
   Send,
@@ -22,6 +22,7 @@ export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);
   const [overview, setOverview] = useState<LearnerOverview | null>(null);
+  const [studyPlan, setStudyPlan] = useState<StudyPlan | null>(null);
   const [quickQuery, setQuickQuery] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(true);
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
@@ -32,11 +33,17 @@ export const DashboardPage: React.FC = () => {
       try {
         const cList = await courseService.list();
         setCourses(cList);
+
         if (cList.length > 0) {
-          const oView = await learnerService.getOverview(cList[0].id);
+          const [oView, sPlan] = await Promise.all([
+            learnerService.getOverview(cList[0].id),
+            learnerService.getStudyPlan(cList[0].id),
+          ]);
           setOverview(oView);
+          setStudyPlan(sPlan);
         } else {
           setOverview(null);
+          setStudyPlan(null);
         }
       } catch (err) {
         console.error('Failed to load dashboard', err);
@@ -326,6 +333,49 @@ export const DashboardPage: React.FC = () => {
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Study plan section */}
+      {hasCourses && studyPlan && studyPlan.days.length > 0 && (
+        <div className="space-y-3 pt-2">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+              Study Plan
+            </h2>
+            <button
+              onClick={() => navigate('/practice')}
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors cursor-pointer"
+            >
+              Start practice
+            </button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            {studyPlan.days.map((day) => (
+              <div key={`${day.day}-${day.focus_topic}`} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 font-semibold">
+                    {day.day}
+                  </span>
+                  <span className="text-slate-500">{day.estimated_minutes} min</span>
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-slate-900">{day.focus_topic}</h3>
+                  <p className="text-xs text-slate-600">{day.objective}</p>
+                </div>
+                <ul className="space-y-1.5 text-[11px] text-slate-600 list-disc pl-4">
+                  {day.activities.map((activity, index) => (
+                    <li key={`${day.day}-${index}`}>{activity}</li>
+                  ))}
+                </ul>
+                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                  <span>{day.priority} priority</span>
+                  <span className="font-mono">{day.focus_topic}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}

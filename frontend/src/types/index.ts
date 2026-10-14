@@ -21,7 +21,7 @@ export interface Material {
   id: string;
   course_id: string;
   title: string;
-  file_type: 'pdf' | 'pptx' | 'video';
+  file_type: 'pdf' | 'docx' | 'text' | 'pptx' | 'video';
   file_path: string;
   file_size_bytes: number;
   status: 'uploaded' | 'processing' | 'completed' | 'error';
@@ -71,9 +71,27 @@ export interface Topic {
   mastery: number;
 }
 
+export interface SyllabusItem {
+  name: string;
+  unit?: string;
+  confidence?: number;
+  status: string;
+  mastery: number;
+  concepts: string[];
+}
+
+export interface SyllabusSnapshot {
+  course_id: string;
+  subject_name?: string;
+  subject_code?: string;
+  exam_date?: string;
+  topic_count: number;
+  topics: SyllabusItem[];
+}
+
 export interface Citation {
   source_name: string;
-  material_type: 'pdf' | 'pptx' | 'video';
+  material_type: 'pdf' | 'docx' | 'text' | 'pptx' | 'video';
   page_number?: number;
   slide_number?: number;
   video_timestamp?: string;
@@ -182,6 +200,22 @@ export interface Recommendation {
   priority: number;
   is_completed: boolean;
   created_at: string;
+}
+
+export interface StudyPlanDay {
+  day: string;
+  focus_topic: string;
+  objective: string;
+  activities: string[];
+  estimated_minutes: number;
+  priority: string;
+}
+
+export interface StudyPlan {
+  course_id: string;
+  overall_goal: string;
+  generated_at: string;
+  days: StudyPlanDay[];
 }
 
 export interface LearnerOverview {

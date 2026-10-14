@@ -1,5 +1,6 @@
 import os
 from typing import List, Dict, Any
+from app.ingestion.pdf_processor import DocumentProcessingError, is_readable_content
 
 class PPTXProcessor:
     @staticmethod
@@ -18,7 +19,7 @@ class PPTXProcessor:
                         slide_text_parts.append(shape.text.strip())
                 
                 full_slide_text = "\n".join(slide_text_parts)
-                if not full_slide_text:
+                if not is_readable_content(full_slide_text):
                     continue
                     
                 topic = "General Concepts"
@@ -48,19 +49,10 @@ class PPTXProcessor:
                     "concept": None,
                     "content": full_slide_text
                 })
-        except Exception:
-            # Fallback
-            chunks.append({
-                "course_id": course_id,
-                "material_id": material_id,
-                "material_type": "pptx",
-                "source_name": source_name,
-                "page_number": None,
-                "slide_number": 1,
-                "video_timestamp": None,
-                "topic": "General",
-                "concept": None,
-                "content": f"Slide content from {source_name}"
-            })
+        except Exception as exc:
+            raise DocumentProcessingError("The PPTX file is invalid, corrupted, or could not be parsed.") from exc
+
+        if not chunks:
+            raise DocumentProcessingError("No readable slide text was found in this PPTX.")
             
         return chunks

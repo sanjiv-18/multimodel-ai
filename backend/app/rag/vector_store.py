@@ -1,8 +1,9 @@
 import json
 from typing import List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
-from app.models.db_models import DocumentChunk
+from app.models.db_models import DocumentChunk, Material
 from app.rag.embeddings import EmbeddingService
+from app.ingestion.pdf_processor import is_readable_content
 
 class VectorStore:
     def __init__(self, db: Session):
@@ -11,6 +12,8 @@ class VectorStore:
     def add_chunks(self, chunks: List[Dict[str, Any]]) -> List[DocumentChunk]:
         db_chunks = []
         for ch in chunks:
+            if not is_readable_content(ch.get("content", "")):
+                continue
             vector = EmbeddingService.get_embedding_vector(ch["content"])
             db_chunk = DocumentChunk(
                 course_id=ch["course_id"],
@@ -35,11 +38,19 @@ class VectorStore:
         course_id: str,
         query: str,
         top_k: int = 4,
-        topic_filter: str = None
+        topic_filter: str = None,
+        material_id: str = None,
     ) -> List[Tuple[DocumentChunk, float]]:
         query_vector = EmbeddingService.get_embedding_vector(query)
         
-        query_set = self.db.query(DocumentChunk).filter(DocumentChunk.course_id == course_id)
+        query_set = self.db.query(DocumentChunk).join(
+            Material, Material.id == DocumentChunk.material_id
+        ).filter(
+            DocumentChunk.course_id == course_id,
+            Material.status == "completed",
+        )
+        if material_id:
+            query_set = query_set.filter(DocumentChunk.material_id == material_id)
         if topic_filter and topic_filter != "All":
             query_set = query_set.filter(DocumentChunk.topic.ilike(f"%{topic_filter}%"))
             
@@ -47,6 +58,8 @@ class VectorStore:
         scored_chunks = []
         
         for ch in chunks:
+            if not is_readable_content(ch.content):
+                continue
             if not ch.embedding_json:
                 continue
             chunk_vector = json.loads(ch.embedding_json)

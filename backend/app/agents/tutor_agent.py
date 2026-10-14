@@ -1,10 +1,34 @@
 import json
+import logging
+import re
 from typing import Dict, Any, List, Tuple
 from sqlalchemy.orm import Session
 from app.rag.retriever import CourseRetriever
 from app.core.llm_provider import LLMProvider
 from app.models.db_models import Conversation, Message
 from app.schemas.pydantic_schemas import Citation
+
+logger = logging.getLogger(__name__)
+RAW_DOCUMENT_OUTPUT = re.compile(
+    r"%PDF-\d|PdfReadError|Traceback \(most recent call last\)|"
+    r"Unexpected EOF|Could not read malformed"
+)
+PDF_OBJECT = re.compile(r"\b\d+\s+\d+\s+obj\b")
+
+
+def is_valid_tutor_response(response: str) -> bool:
+    if not isinstance(response, str) or len(response.strip()) < 3:
+        return False
+    object_declarations = len(PDF_OBJECT.findall(response))
+    object_terminators = len(re.findall(r"\bendobj\b|\bendstream\b", response))
+    if (
+        RAW_DOCUMENT_OUTPUT.search(response)
+        or object_declarations >= 2
+        or (object_declarations == 1 and object_terminators >= 2)
+    ):
+        return False
+    nonprinting = sum(not char.isprintable() and char not in "\n\r\t" for char in response)
+    return nonprinting / len(response) <= 0.02
 
 class GroundedTutorAgent:
     """
@@ -22,14 +46,31 @@ class GroundedTutorAgent:
         course_id: str,
         user_id: str,
         query: str,
-        conversation_id: str = None
+        conversation_id: str = None,
+        material_id: str = None,
     ) -> Dict[str, Any]:
+        retrieval_query = query
+        if conversation_id and re.search(
+            r"\b(again|simpler|simple|analogy|example|elaborate|clarify|that)\b",
+            query,
+            re.IGNORECASE,
+        ):
+            prior_question = self.db.query(Message).join(Conversation).filter(
+                Conversation.id == conversation_id,
+                Conversation.course_id == course_id,
+                Conversation.user_id == user_id,
+                Message.sender == "user",
+            ).order_by(Message.created_at.desc()).first()
+            if prior_question:
+                retrieval_query = f"{prior_question.content}\nFollow-up request: {query}"
+
         # 1. Retrieve grounded context
         context_paragraphs, citations, is_supported = self.retriever.retrieve_grounded_context(
             course_id=course_id,
-            query=query,
+            query=retrieval_query,
             top_k=4,
-            min_relevance_threshold=0.15
+            min_relevance_threshold=0.15,
+            material_id=material_id,
         )
 
         # 2. If out of domain / not supported in uploaded material
@@ -60,23 +101,46 @@ class GroundedTutorAgent:
 
         # 3. Generate grounded answer
         system_prompt = (
-            "You are LearnFlow AI Grounded Tutor. Answer the student's question using ONLY the provided course excerpts. "
-            "Cite your sources precisely in brackets, e.g. [DataStructures.pdf — Page 14] or [Lecture 01 — 14:22]. "
-            "Do NOT extrapolate beyond the given context. If a detail is missing, state it clearly."
+            "You are LearnFlow AI, a clear and patient student tutor. Use only the supplied readable course excerpts "
+            "for document-specific facts. Explain concepts step by step and use a simple analogy when requested. "
+            "State when the excerpts do not contain a detail. Never claim an unsupported fact came from the material, "
+            "invent a citation or page, or reproduce file bytes, PDF syntax, parser output, or diagnostics. "
+            "Source references are displayed separately by the application; do not fabricate inline citations."
         )
 
         rag_context_str = "\n\n---\n\n".join(context_paragraphs)
-        user_prompt = f"COURSE MATERIAL EXCERPTS:\n{rag_context_str}\n\nSTUDENT QUESTION:\n{query}\n\nGROUNDED TUTOR EXPLANATION:"
-
+        user_prompt = (
+            f"COURSE MATERIAL EXCERPTS:\n{rag_context_str}\n\n"
+            f"STUDENT QUESTION:\n{query}\n\n"
+            "Answer as a helpful tutor. Be clear, student-friendly, and grounded in the excerpts."
+        )
         raw_answer = await LLMProvider.generate_response(user_prompt, system_prompt=system_prompt)
+        if not is_valid_tutor_response(raw_answer):
+            logger.warning("Rejected malformed tutor response for course %s", course_id)
+            retry_prompt = (
+                user_prompt
+                + "\n\nRewrite your answer as plain, readable educational prose. "
+                "Do not include PDF internals, binary data, parser errors, or debugging output."
+            )
+            raw_answer = await LLMProvider.generate_response(retry_prompt, system_prompt=system_prompt)
+        answer_is_valid = is_valid_tutor_response(raw_answer)
+        if not answer_is_valid:
+            logger.warning("Tutor retry remained malformed for course %s", course_id)
+            raw_answer = (
+                "I couldn't produce a readable answer from the retrieved course material. "
+                "Please retry your question or reprocess the document."
+            )
 
         # Append structured citation summary if not present
-        citation_dicts = [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in citations]
+        citation_dicts = (
+            [c.model_dump() if hasattr(c, "model_dump") else c.dict() for c in citations]
+            if answer_is_valid else []
+        )
         
         # Save to DB
         conv = self._get_or_create_conversation(course_id, user_id, conversation_id, query)
         self._save_message(conv.id, "user", query, [], True)
-        tutor_msg = self._save_message(conv.id, "tutor", raw_answer, citation_dicts, True)
+        tutor_msg = self._save_message(conv.id, "tutor", raw_answer, citation_dicts, answer_is_valid)
 
         return {
             "conversation_id": conv.id,
@@ -85,7 +149,7 @@ class GroundedTutorAgent:
                 "sender": "tutor",
                 "content": raw_answer,
                 "citations": citation_dicts,
-                "is_grounded": True,
+                "is_grounded": answer_is_valid,
                 "created_at": tutor_msg.created_at
             }
         }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { tutorService, courseService, materialService } from '../services/api';
 import { Course, Message, Citation } from '../types';
@@ -6,17 +6,10 @@ import { CitationBadge } from '../components/CitationBadge';
 import { SourceViewerModal } from '../components/SourceViewerModal';
 import {
   Send,
-  BookOpen,
-  HelpCircle,
-  Sparkles,
-  ArrowRight,
   RefreshCw,
-  PenTool,
   Paperclip,
   X,
   FileText,
-  UploadCloud,
-  CheckCircle2,
   FolderPlus
 } from 'lucide-react';
 
@@ -29,6 +22,7 @@ export const TutorChatPage: React.FC = () => {
   const [inputQuery, setInputQuery] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  const [focusedMaterialId, setFocusedMaterialId] = useState<string | undefined>(undefined);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
 
   // File Upload State
@@ -36,6 +30,7 @@ export const TutorChatPage: React.FC = () => {
   const [uploadingFile, setUploadingFile] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initialPromptHandledRef = useRef<string | null>(null);
 
   useEffect(() => {
     const initTutor = async () => {
@@ -43,8 +38,13 @@ export const TutorChatPage: React.FC = () => {
         const cList = await courseService.list();
         setCourses(cList);
         if (cList.length > 0) {
-          const cId = cList[0].id;
+          const requestedCourseId = (location.state as any)?.courseId;
+          const cId = cList.some((course) => course.id === requestedCourseId)
+            ? requestedCourseId
+            : cList[0].id;
           setSelectedCourseId(cId);
+          const requestedMaterialId = (location.state as any)?.materialId;
+          if (requestedMaterialId) setFocusedMaterialId(requestedMaterialId);
           const convs = await tutorService.listConversations(cId);
           if (convs.length > 0 && convs[0].messages.length > 0) {
             setConversationId(convs[0].id);
@@ -54,7 +54,7 @@ export const TutorChatPage: React.FC = () => {
               {
                 id: 'init-1',
                 sender: 'tutor',
-                content: `Hi! I am your AI course tutor for **${cList[0].title}**. Ask any doubt grounded in your course materials, or click 📎 to upload class notes and slides directly.`,
+                content: `Hi! I am your AI course tutor for **${cList.find((course) => course.id === cId)?.title || cList[0].title}**. Ask any doubt grounded in your course materials, or click 📎 to upload class notes and slides directly.`,
                 citations: [],
                 is_grounded: true,
                 created_at: new Date().toISOString(),
@@ -67,17 +67,6 @@ export const TutorChatPage: React.FC = () => {
       }
     };
     initTutor();
-  }, []);
-
-  // Handle passed initial prompt from dashboard
-  useEffect(() => {
-    if (location.state && (location.state as any).initialPrompt) {
-      const p = (location.state as any).initialPrompt;
-      setInputQuery(p);
-      setTimeout(() => {
-        handleSend(p);
-      }, 100);
-    }
   }, [location.state]);
 
   useEffect(() => {
@@ -92,6 +81,7 @@ export const TutorChatPage: React.FC = () => {
 
   const handleCourseChange = async (courseId: string) => {
     setSelectedCourseId(courseId);
+    setFocusedMaterialId(undefined);
     try {
       const convs = await tutorService.listConversations(courseId);
       if (convs.length > 0 && convs[0].messages.length > 0) {
@@ -116,12 +106,13 @@ export const TutorChatPage: React.FC = () => {
     }
   };
 
-  const handleSend = async (queryToSend?: string) => {
+  const handleSend = useCallback(async (queryToSend?: string) => {
     const query = queryToSend || inputQuery;
     if ((!query.trim() && !attachedFile) || !selectedCourseId || loading) return;
 
     const courseId = selectedCourseId;
     let finalQuery = query.trim();
+    let materialId = focusedMaterialId;
 
     setLoading(true);
     setInputQuery('');
@@ -130,7 +121,7 @@ export const TutorChatPage: React.FC = () => {
     if (attachedFile) {
       setUploadingFile(true);
       try {
-        await materialService.upload(
+        const uploadedMaterial = await materialService.upload(
           courseId,
           attachedFile,
           attachedFile.name
@@ -138,6 +129,22 @@ export const TutorChatPage: React.FC = () => {
         
         const fileName = attachedFile.name;
         setAttachedFile(null);
+        if (uploadedMaterial.status !== 'completed' || uploadedMaterial.chunks_count < 1) {
+          setMessages((prev) => [...prev, {
+            id: `upload-error-${Date.now()}`,
+            sender: 'tutor',
+            content: uploadedMaterial.error_message
+              ? `I couldn't process "${fileName}": ${uploadedMaterial.error_message}`
+              : `I couldn't extract readable study text from "${fileName}". Please reprocess it or upload a text-based version.`,
+            citations: [],
+            is_grounded: false,
+            created_at: new Date().toISOString(),
+          }]);
+          setLoading(false);
+          return;
+        }
+        materialId = uploadedMaterial.id;
+        setFocusedMaterialId(uploadedMaterial.id);
 
         if (!finalQuery) {
           finalQuery = `I just uploaded "${fileName}". Please explain the key concepts and summarize the main takeaways.`;
@@ -154,6 +161,17 @@ export const TutorChatPage: React.FC = () => {
         setMessages((prev) => [...prev, userMsg]);
       } catch (uploadErr) {
         console.error('Error uploading attached note', uploadErr);
+        const detail = (uploadErr as any)?.response?.data?.detail;
+        setMessages((prev) => [...prev, {
+          id: `upload-error-${Date.now()}`,
+          sender: 'tutor',
+          content: detail || 'I could not upload or process that document. Please check its format and try again.',
+          citations: [],
+          is_grounded: false,
+          created_at: new Date().toISOString(),
+        }]);
+        setLoading(false);
+        return;
       } finally {
         setUploadingFile(false);
       }
@@ -170,7 +188,7 @@ export const TutorChatPage: React.FC = () => {
     }
 
     try {
-      const res = await tutorService.chat(courseId, finalQuery, conversationId);
+      const res = await tutorService.chat(courseId, finalQuery, conversationId, materialId);
       setConversationId(res.conversation_id);
       setMessages((prev) => [...prev, res.message]);
     } catch (err) {
@@ -188,7 +206,15 @@ export const TutorChatPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [attachedFile, conversationId, focusedMaterialId, inputQuery, loading, selectedCourseId]);
+
+  useEffect(() => {
+    const initialPrompt = (location.state as any)?.initialPrompt;
+    if (!selectedCourseId || !initialPrompt || initialPromptHandledRef.current === location.key) return;
+    initialPromptHandledRef.current = location.key;
+    setInputQuery(initialPrompt);
+    void handleSend(initialPrompt);
+  }, [handleSend, location.key, location.state, selectedCourseId]);
 
   const handleActionClick = (actionType: 'simply' | 'example' | 'practice' | 'source', lastMsg: Message) => {
     if (actionType === 'simply') {
@@ -380,7 +406,7 @@ export const TutorChatPage: React.FC = () => {
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelect}
-            accept=".txt,.pdf,.pptx,.ppt,.md,.mp4"
+            accept=".txt,.pdf,.docx,.pptx,.md,.markdown,.mp4,.mkv,.avi,.mov,.mp3,.wav"
             className="hidden"
           />
 

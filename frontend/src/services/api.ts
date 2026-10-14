@@ -1,7 +1,8 @@
 import axios from 'axios';
 import {
   User, Course, Material, Topic, Assessment, AssessmentResult,
-  LearnerOverview, EvaluationResults, ChatResponse, Conversation, StudyGuide
+  LearnerOverview, EvaluationResults, ChatResponse, Conversation, StudyGuide,
+  SyllabusSnapshot, StudyPlan
 } from '../types';
 
 
@@ -98,13 +99,30 @@ export const knowledgeService = {
     const res = await api.get(`/courses/${courseId}/knowledge-map`);
     return res.data;
   },
+  getSyllabus: async (courseId: string): Promise<SyllabusSnapshot> => {
+    const res = await api.get(`/courses/${courseId}/syllabus`);
+    return res.data;
+  },
+  syncSyllabus: async (courseId: string, payload: {
+    subject_name?: string;
+    subject_code?: string;
+    exam_date?: string;
+    syllabus_text?: string;
+    unit_names?: string[];
+    topics?: string[];
+    confidence_by_topic?: Record<string, number>;
+  }): Promise<SyllabusSnapshot> => {
+    const res = await api.post(`/courses/${courseId}/syllabus`, payload);
+    return res.data;
+  },
 };
 
 export const tutorService = {
-  chat: async (courseId: string, message: string, conversationId?: string): Promise<ChatResponse> => {
+  chat: async (courseId: string, message: string, conversationId?: string, materialId?: string): Promise<ChatResponse> => {
     const res = await api.post(`/courses/${courseId}/chat`, {
       message,
       conversation_id: conversationId,
+      material_id: materialId,
     });
     return res.data;
   },
@@ -157,6 +175,10 @@ export const learnerService = {
   },
   getRecommendations: async (courseId?: string) => {
     const res = await api.get('/students/me/recommendations', { params: { course_id: courseId } });
+    return res.data;
+  },
+  getStudyPlan: async (courseId?: string): Promise<StudyPlan> => {
+    const res = await api.get('/students/me/study-plan', { params: { course_id: courseId } });
     return res.data;
   },
 };

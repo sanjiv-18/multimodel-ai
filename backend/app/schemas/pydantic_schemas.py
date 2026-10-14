@@ -103,6 +103,34 @@ class KnowledgeMapOut(BaseModel):
     nodes: List[KnowledgeMapNode]
     edges: List[KnowledgeMapEdge]
 
+# --- Syllabus Intelligence ---
+class SyllabusItemOut(BaseModel):
+    name: str
+    unit: Optional[str] = None
+    confidence: Optional[int] = None
+    status: str = "Not Started"
+    mastery: float = 0.0
+    concepts: List[str] = []
+    class Config:
+        from_attributes = True
+
+class SyllabusSnapshotOut(BaseModel):
+    course_id: str
+    subject_name: Optional[str] = None
+    subject_code: Optional[str] = None
+    exam_date: Optional[str] = None
+    topic_count: int = 0
+    topics: List[SyllabusItemOut] = []
+
+class SyllabusSyncRequest(BaseModel):
+    subject_name: Optional[str] = None
+    subject_code: Optional[str] = None
+    exam_date: Optional[str] = None
+    syllabus_text: Optional[str] = None
+    unit_names: List[str] = []
+    topics: List[str] = []
+    confidence_by_topic: Dict[str, int] = {}
+
 # --- Citations & Chat ---
 class Citation(BaseModel):
     source_name: str
@@ -137,6 +165,7 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
     topic_focus: Optional[str] = None
+    material_id: Optional[str] = None
 
 class MessageOut(BaseModel):
     id: str
@@ -248,6 +277,20 @@ class RecommendationOut(BaseModel):
     priority: int
     is_completed: bool
     created_at: datetime
+
+class StudyPlanDayOut(BaseModel):
+    day: str
+    focus_topic: str
+    objective: str
+    activities: List[str] = []
+    estimated_minutes: int = 30
+    priority: str = "High"
+
+class StudyPlanOut(BaseModel):
+    course_id: str
+    overall_goal: str
+    generated_at: datetime
+    days: List[StudyPlanDayOut] = []
 
 class LearnerOverviewOut(BaseModel):
     overall_mastery: float

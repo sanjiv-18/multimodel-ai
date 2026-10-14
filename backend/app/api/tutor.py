@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database.session import get_db
-from app.models.db_models import Conversation, Message, Course, User
+from app.models.db_models import Conversation, Message, Course, Material, User
 from app.schemas.pydantic_schemas import ChatRequest, ChatResponse, ConversationOut, MessageOut, Citation
 from app.agents.tutor_agent import GroundedTutorAgent
 from app.api.auth import get_current_user
@@ -24,13 +24,27 @@ async def chat_with_tutor(
     if course.user_id and course.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: This course belongs to another student.")
 
+    if chat_req.material_id:
+        material = db.query(Material).filter(
+            Material.id == chat_req.material_id,
+            Material.course_id == course_id,
+        ).first()
+        if not material:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found in this course.")
+        if material.status != "completed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=material.error_message or "This document is not ready for questions yet.",
+            )
+
     tutor_agent = GroundedTutorAgent(db)
 
     result = await tutor_agent.answer_query(
         course_id=course_id,
         user_id=current_user.id,
         query=chat_req.message,
-        conversation_id=chat_req.conversation_id
+        conversation_id=chat_req.conversation_id,
+        material_id=chat_req.material_id,
     )
 
     msg_data = result["message"]

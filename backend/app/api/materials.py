@@ -1,31 +1,22 @@
 import os
-import shutil
+import uuid
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
 from sqlalchemy.orm import Session
 from app.database.session import get_db
 from app.models.db_models import Material, Course, DocumentChunk, User
 from app.schemas.pydantic_schemas import MaterialOut, StudyGuideOut, StudySection, Citation
 from app.agents.ingestion_agent import MultimodalIngestionAgent
+from app.ingestion.pdf_processor import DocumentProcessingError, detect_file_type, is_readable_content
 
 from app.core.config import settings
 from app.api.auth import get_current_user
 
 router = APIRouter(tags=["Materials"])
 
-def process_material_background(material_id: str):
-    from app.database.session import SessionLocal
-    db = SessionLocal()
-    try:
-        agent = MultimodalIngestionAgent(db)
-        agent.process_material(material_id)
-    finally:
-        db.close()
-
 @router.post("/courses/{course_id}/materials", response_model=MaterialOut)
 async def upload_material(
     course_id: str,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     title: str = Form(None),
     db: Session = Depends(get_db),
@@ -34,21 +25,22 @@ async def upload_material(
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    if course.user_id and course.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Course belongs to another student.")
 
-    filename = file.filename or "uploaded_file"
+    filename = (file.filename or "uploaded_file").replace("\\", "/").split("/")[-1]
     file_title = title if title else filename
-    ext = filename.split(".")[-1].lower() if "." in filename else "txt"
-
-    file_type = "pdf"
-    if ext in ["ppt", "pptx"]:
-        file_type = "pptx"
-    elif ext in ["mp4", "mkv", "avi", "mov", "mp3", "wav"]:
-        file_type = "video"
+    content = await file.read()
+    try:
+        file_type = detect_file_type(filename, file.content_type, content)
+    except DocumentProcessingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Save to disk
-    save_path = os.path.join(settings.UPLOAD_DIR, f"{course_id}_{filename}")
+    stored_filename = f"{course_id}_{uuid.uuid4().hex}_{filename}"
+    save_path = os.path.join(settings.UPLOAD_DIR, stored_filename)
     with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(content)
 
     file_size = os.path.getsize(save_path)
 
@@ -68,15 +60,16 @@ async def upload_material(
     ingestion_agent = MultimodalIngestionAgent(db)
     ingestion_agent.process_material(material.id)
     
-    # Trigger Agent 2 (Knowledge Org) to extract new topics & concepts from notes
-    from app.agents.knowledge_agent import KnowledgeOrganizationAgent
-    from app.agents.personalization_agent import PersonalizationAgent
-    k_agent = KnowledgeOrganizationAgent(db)
-    k_agent.organize_course_knowledge(course_id)
+    if material.status == "completed":
+        # Trigger Agent 2 (Knowledge Org) to extract new topics & concepts from notes
+        from app.agents.knowledge_agent import KnowledgeOrganizationAgent
+        from app.agents.personalization_agent import PersonalizationAgent
+        k_agent = KnowledgeOrganizationAgent(db)
+        k_agent.organize_course_knowledge(course_id)
 
-    # Trigger Agent 8 (Personalization) to create baseline recommendations
-    p_agent = PersonalizationAgent(db)
-    p_agent.generate_recommendations(current_user.id, course_id)
+        # Trigger Agent 8 (Personalization) to create baseline recommendations
+        p_agent = PersonalizationAgent(db)
+        p_agent.generate_recommendations(current_user.id, course_id)
 
     db.refresh(material)
 
@@ -174,7 +167,12 @@ def get_course_study_guide(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: Course belongs to another student.")
 
     # Target specific material or all materials in course
-    chunk_query = db.query(DocumentChunk).filter(DocumentChunk.course_id == course_id)
+    chunk_query = db.query(DocumentChunk).join(
+        Material, Material.id == DocumentChunk.material_id
+    ).filter(
+        DocumentChunk.course_id == course_id,
+        Material.status == "completed",
+    )
     target_mat_title = None
     if material_id:
         target_mat = db.query(Material).filter(Material.id == material_id, Material.course_id == course_id).first()
@@ -183,7 +181,7 @@ def get_course_study_guide(
         target_mat_title = target_mat.title
         chunk_query = chunk_query.filter(DocumentChunk.material_id == material_id)
 
-    chunks = chunk_query.all()
+    chunks = [chunk for chunk in chunk_query.all() if is_readable_content(chunk.content)]
     if not chunks:
         return StudyGuideOut(
             course_id=course_id,
@@ -314,4 +312,3 @@ def delete_material(
     p_agent.generate_recommendations(current_user.id, course.id)
 
     return {"status": "deleted", "material_id": material_id}
-

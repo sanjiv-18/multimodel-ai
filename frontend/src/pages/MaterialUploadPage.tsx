@@ -3,7 +3,7 @@ import { materialService, courseService } from '../services/api';
 import { Material, Course } from '../types';
 import {
   UploadCloud, FileText, Presentation, Video, CheckCircle2,
-  AlertCircle, Sparkles, Layers, Check, Loader2, FolderPlus, Trash2
+  AlertCircle, Sparkles, Layers, Check, Loader2, Trash2
 } from 'lucide-react';
 
 export const MaterialUploadPage: React.FC = () => {
@@ -89,9 +89,13 @@ export const MaterialUploadPage: React.FC = () => {
       );
 
       setCurrentStage('Extracting topics and indexing semantic chunks...');
-      setSuccessMessage(
-        `Successfully ingested "${uploadedMat.title}" with ${uploadedMat.chunks_count || 'multiple'} indexed semantic chunks.`
-      );
+      if (uploadedMat.status === 'completed' && uploadedMat.chunks_count > 0) {
+        setSuccessMessage(
+          `Successfully ingested "${uploadedMat.title}" with ${uploadedMat.chunks_count} indexed semantic chunks.`
+        );
+      } else {
+        setError(uploadedMat.error_message || `Could not extract readable text from "${uploadedMat.title}".`);
+      }
       setSelectedFile(null);
       setCustomTitle('');
 
@@ -170,13 +174,13 @@ export const MaterialUploadPage: React.FC = () => {
                     <input
                       type="file"
                       className="hidden"
-                      accept=".pdf,.ppt,.pptx,.txt,.md,.mp4"
+                      accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.mp4,.mkv,.avi,.mov,.mp3,.wav"
                       onChange={(e) => e.target.files && setSelectedFile(e.target.files[0])}
                     />
                   </label>
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Supported: PDF textbooks, PPT/PPTX slide decks, TXT/MD class notes, MP4 lecture recordings
+                  Supported: text-based PDF, DOCX, PPTX, TXT/MD notes, and recordings with a VTT transcript
                 </p>
               </div>
             )}
@@ -245,8 +249,8 @@ export const MaterialUploadPage: React.FC = () => {
               <Layers className="w-4 h-4 text-indigo-600" />
               Indexed Documents ({materials.length})
             </h3>
-            <span className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
-              <Check className="w-3.5 h-3.5" /> Vector Indexed
+            <span className="text-[11px] text-slate-500 font-medium flex items-center gap-1">
+              <Check className="w-3.5 h-3.5" /> Processing Status
             </span>
           </div>
 
@@ -258,7 +262,7 @@ export const MaterialUploadPage: React.FC = () => {
               >
                 <div className="flex items-center gap-3">
                   <div className="p-2 rounded-xl bg-slate-100 text-slate-600">
-                    {mat.file_type === 'pdf' && <FileText className="w-4 h-4 text-rose-600" />}
+                    {(mat.file_type === 'pdf' || mat.file_type === 'docx' || mat.file_type === 'text') && <FileText className="w-4 h-4 text-rose-600" />}
                     {mat.file_type === 'pptx' && <Presentation className="w-4 h-4 text-amber-600" />}
                     {mat.file_type === 'video' && <Video className="w-4 h-4 text-sky-600" />}
                   </div>
@@ -271,7 +275,13 @@ export const MaterialUploadPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase font-semibold">
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border uppercase font-semibold ${
+                    mat.status === 'completed'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : mat.status === 'error'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
                     {mat.status}
                   </span>
                   <button
@@ -282,6 +292,9 @@ export const MaterialUploadPage: React.FC = () => {
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
+                {mat.error_message && (
+                  <p className="mt-2 text-[11px] text-rose-700">{mat.error_message}</p>
+                )}
               </div>
             ))}
           </div>

@@ -105,9 +105,9 @@ export const UploadNotesModal: React.FC<UploadNotesModalProps> = ({
   const handleFileSelected = (file: File) => {
     // Validate format
     const ext = file.name.split('.').pop()?.toLowerCase();
-    const validExts = ['pdf', 'pptx', 'ppt', 'txt', 'md', 'markdown', 'mp4'];
+    const validExts = ['pdf', 'docx', 'pptx', 'txt', 'md', 'markdown', 'mp4', 'mkv', 'avi', 'mov', 'mp3', 'wav'];
     if (!ext || !validExts.includes(ext)) {
-      setError(`Unsupported file type (.${ext}). Supported formats: PDF, PPT/PPTX, TXT/MD, and MP4.`);
+      setError(`Unsupported file type (.${ext}). Supported formats: PDF, DOCX, PPTX, TXT/MD, and recordings with a VTT transcript.`);
       return;
     }
     // Validate size (max 50MB)
@@ -141,9 +141,13 @@ export const UploadNotesModal: React.FC<UploadNotesModalProps> = ({
       );
 
       setUploadProgressStage('Indexing semantic chunks and topic nodes...');
-      setCompletedMaterial(uploadedMat);
-      if (onUploadSuccess) {
-        onUploadSuccess(selectedCourseId, uploadedMat);
+      if (uploadedMat.status !== 'completed' || uploadedMat.chunks_count < 1) {
+        setError(uploadedMat.error_message || `Could not extract readable text from "${uploadedMat.title}".`);
+      } else {
+        setCompletedMaterial(uploadedMat);
+        if (onUploadSuccess) {
+          onUploadSuccess(selectedCourseId, uploadedMat);
+        }
       }
     } catch (err: any) {
       console.error('Failed to process material upload', err);
@@ -155,8 +159,6 @@ export const UploadNotesModal: React.FC<UploadNotesModalProps> = ({
   };
 
   if (!isOpen) return null;
-
-  const currentCourse = courses.find(c => c.id === selectedCourseId);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
@@ -251,6 +253,7 @@ export const UploadNotesModal: React.FC<UploadNotesModalProps> = ({
                     navigate('/tutor', {
                       state: {
                         courseId: selectedCourseId,
+                        materialId: completedMaterial.id,
                         initialPrompt: `I just uploaded "${completedMaterial.title}". What are the key concepts and fundamental principles covered?`,
                       },
                     });
@@ -371,7 +374,7 @@ export const UploadNotesModal: React.FC<UploadNotesModalProps> = ({
                       handleFileSelected(e.target.files[0]);
                     }
                   }}
-                  accept=".pdf,.pptx,.ppt,.txt,.md,.markdown,.mp4"
+                  accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.mp4,.mkv,.avi,.mov,.mp3,.wav"
                   className="hidden"
                 />
 
@@ -385,7 +388,7 @@ export const UploadNotesModal: React.FC<UploadNotesModalProps> = ({
                       Drag and drop your study document here, or <span className="text-indigo-600 underline">browse</span>
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      Supports PDF textbooks, PPT/PPTX slides, TXT/MD class notes, and MP4 lecture recordings (up to 50MB)
+                      Supports text-based PDF, DOCX, PPTX, TXT/MD, and recordings with VTT transcript (up to 50MB)
                     </p>
                   </div>
                 </div>

@@ -14,20 +14,26 @@ class CourseRetriever:
         course_id: str,
         query: str,
         top_k: int = 4,
-        min_relevance_threshold: float = 0.15
+        min_relevance_threshold: float = 0.15,
+        material_id: str = None,
     ) -> Tuple[List[str], List[Citation], bool]:
         """
         Retrieves context chunks and produces verified citation objects.
         Returns: (context_paragraphs, citations, is_supported)
         """
-        scored_chunks = self.vector_store.similarity_search(course_id, query, top_k=top_k)
+        scored_chunks = self.vector_store.similarity_search(
+            course_id, query, top_k=top_k, material_id=material_id
+        )
         
         # Check that query has non-trivial keyword overlap with retrieved content
         query_tokens = set(EmbeddingService.tokenize(query))
         has_overlap = False
         if scored_chunks:
-            top_chunk_tokens = set(EmbeddingService.tokenize(scored_chunks[0][0].content))
-            has_overlap = len(query_tokens.intersection(top_chunk_tokens)) > 0
+            retrieved_tokens = set().union(*(
+                set(EmbeddingService.tokenize(chunk.content))
+                for chunk, _ in scored_chunks
+            ))
+            has_overlap = len(query_tokens.intersection(retrieved_tokens)) > 0
 
         # Check relevance
         if not scored_chunks or scored_chunks[0][1] < min_relevance_threshold or not has_overlap:
@@ -35,12 +41,14 @@ class CourseRetriever:
             
         context_paragraphs = []
         citations = []
+        context_budget = 10000
         
         for chunk, score in scored_chunks:
-            if score < min_relevance_threshold * 0.7:
+            if score < min_relevance_threshold * 0.7 or context_budget <= 0:
                 continue
-                
-            snippet = chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content
+
+            content = chunk.content[:context_budget]
+            snippet = content[:200] + "..." if len(content) > 200 else content
             
             citation = Citation(
                 source_name=chunk.source_name,
@@ -65,7 +73,8 @@ class CourseRetriever:
                 loc_label = f"Timestamp {chunk.video_timestamp}"
                 
             header = f"[{chunk.source_name} — {loc_label}]" if loc_label else f"[{chunk.source_name}]"
-            context_paragraphs.append(f"{header}\n{chunk.content}")
+            context_paragraphs.append(f"{header}\n{content}")
+            context_budget -= len(content)
             
         is_supported = len(citations) > 0
         return context_paragraphs, citations, is_supported

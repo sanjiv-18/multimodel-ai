@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { courseService, materialService, knowledgeService, learnerService } from '../services/api';
-import { Course, Material, Topic, LearnerOverview } from '../types';
+import { Course, Material, Topic, LearnerOverview, SyllabusSnapshot } from '../types';
 import {
-  BookOpen, Layers, UploadCloud, MessageSquare, HelpCircle, BarChart3,
-  FileText, Presentation, Video, CheckCircle2, Clock, Sparkles, Plus,
+  BookOpen, UploadCloud, MessageSquare, HelpCircle, BarChart3,
+  FileText, Presentation, Video, CheckCircle2, Plus,
   FolderPlus, X, RefreshCw, Trash2, PenTool
 } from 'lucide-react';
 
@@ -12,9 +12,10 @@ export const CourseDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'materials' | 'topics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'materials' | 'topics' | 'syllabus'>('overview');
   const [materials, setMaterials] = useState<Material[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [syllabus, setSyllabus] = useState<SyllabusSnapshot | null>(null);
   const [overview, setOverview] = useState<LearnerOverview | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -53,14 +54,16 @@ export const CourseDetailPage: React.FC = () => {
 
   const loadCourseDetails = async (courseId: string) => {
     try {
-      const [mats, tops, oView] = await Promise.all([
+      const [mats, tops, oView, syllabusSnapshot] = await Promise.all([
         materialService.list(courseId),
         knowledgeService.getTopics(courseId),
         learnerService.getOverview(courseId),
+        knowledgeService.getSyllabus(courseId).catch(() => null),
       ]);
       setMaterials(mats);
       setTopics(tops);
       setOverview(oView);
+      setSyllabus(syllabusSnapshot);
     } catch (err) {
       console.error('Error loading course details', err);
     }
@@ -101,11 +104,15 @@ export const CourseDetailPage: React.FC = () => {
     const file = e.target.files[0];
     setUploading(true);
     try {
-      await materialService.upload(selectedCourseId, file, file.name);
+      const uploaded = await materialService.upload(selectedCourseId, file, file.name);
       await loadCourseDetails(selectedCourseId);
+      if (uploaded.status !== 'completed' || uploaded.chunks_count < 1) {
+        window.alert(uploaded.error_message || `Could not extract readable study text from "${uploaded.title}".`);
+      }
       if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (err) {
       console.error('Failed to upload material', err);
+      window.alert((err as any)?.response?.data?.detail || 'Could not upload or process this document.');
     } finally {
       setUploading(false);
     }
@@ -237,7 +244,7 @@ export const CourseDetailPage: React.FC = () => {
                   type="file"
                   ref={fileInputRef}
                   onChange={handleFileUpload}
-                  accept=".pdf,.pptx,.ppt,.txt,.md,.mp4"
+                  accept=".pdf,.docx,.pptx,.txt,.md,.markdown,.mp4,.mkv,.avi,.mov,.mp3,.wav"
                   className="hidden"
                 />
                 <button
@@ -296,6 +303,16 @@ export const CourseDetailPage: React.FC = () => {
                 }`}
               >
                 Extracted Topics ({topics.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('syllabus')}
+                className={`px-4 py-2 rounded-xl transition-all cursor-pointer ${
+                  activeTab === 'syllabus'
+                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-100'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                }`}
+              >
+                Syllabus Intelligence
               </button>
             </div>
           </div>
@@ -503,6 +520,79 @@ export const CourseDetailPage: React.FC = () => {
               ) : (
                 <div className="p-12 text-center text-xs text-slate-400 bg-white rounded-2xl border border-slate-200 shadow-sm">
                   No topics extracted yet. Upload course materials to automatically extract knowledge nodes.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tab 4: Syllabus Intelligence */}
+          {activeTab === 'syllabus' && (
+            <div className="space-y-4">
+              <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Syllabus Intelligence</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Track topics from the syllabus, connect them to upload notes, and monitor learning readiness.
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const snapshot = await knowledgeService.syncSyllabus(currentCourse.id, {
+                          subject_name: currentCourse.title,
+                          subject_code: currentCourse.code,
+                          syllabus_text: currentCourse.description || '',
+                          topics: topics.map((topic) => topic.name),
+                        });
+                        setSyllabus(snapshot);
+                        await loadCourseDetails(currentCourse.id);
+                      } catch (error) {
+                        console.error('Unable to sync syllabus', error);
+                      }
+                    }}
+                    className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer"
+                  >
+                    Sync syllabus overview
+                  </button>
+                </div>
+              </div>
+
+              {syllabus && syllabus.topics.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {syllabus.topics.map((item, index) => (
+                    <div key={`${item.name}-${index}`} className="p-5 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h4 className="font-bold text-sm text-slate-900">{item.name}</h4>
+                        <span className="text-[10px] font-semibold px-2 py-1 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                          {item.status}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-500">
+                        <span>{item.unit || 'General unit'}</span>
+                        <span>{Math.round((item.mastery || 0) * 100)}% mastery</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-emerald-500 h-1.5 rounded-full"
+                          style={{ width: `${Math.round((item.mastery || 0) * 100)}%` }}
+                        ></div>
+                      </div>
+                      {item.concepts && item.concepts.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {item.concepts.slice(0, 4).map((concept) => (
+                            <span key={concept} className="text-[10px] px-2 py-1 rounded bg-slate-100 text-slate-700">
+                              {concept}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-12 text-center text-xs text-slate-400 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                  No syllabus map yet. Upload a course description or syllabus text to start tracking topic readiness.
                 </div>
               )}
             </div>
