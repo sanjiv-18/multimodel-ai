@@ -20,6 +20,12 @@ export const LandingPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+
     setLoading(true);
     try {
       if (isLogin) {
@@ -153,17 +159,28 @@ export const LandingPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">
-                Password
-              </label>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs font-semibold text-slate-700 block">
+                  Password
+                </label>
+                <span className="text-[11px] text-slate-500">
+                  Minimum 8 characters
+                </span>
+              </div>
               <input
                 type="password"
                 required
+                minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm focus:outline-none focus:border-indigo-500 focus:bg-white transition-colors"
               />
+              {password.length > 0 && password.length < 8 && (
+                <p className="text-[11px] text-amber-600 mt-1 font-medium">
+                  Password must be at least 8 characters ({password.length}/8)
+                </p>
+              )}
             </div>
 
             <button
@@ -174,6 +191,23 @@ export const LandingPage: React.FC = () => {
               {loading ? 'Processing...' : isLogin ? 'Sign In' : 'Create Account'}
               <ArrowRight className="w-4 h-4" />
             </button>
+
+            {isLogin && (
+              <div className="pt-1 text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail('demo@learnflow.ai');
+                    setPassword('demo1234');
+                    setError('');
+                  }}
+                  className="text-xs text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                  Quick Fill Demo Credentials (<span className="font-mono text-slate-700">demo1234</span>)
+                </button>
+              </div>
+            )}
           </form>
 
           <div className="text-center mt-5 pt-4 border-t border-slate-100">
